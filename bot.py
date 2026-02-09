@@ -12,7 +12,6 @@ bot = telebot.TeleBot(API_TOKEN)
 
 USER_FILE = "users.txt"
 
-# --- Database ---
 def save_user(user_id):
     if not os.path.exists(USER_FILE):
         open(USER_FILE, "w").close()
@@ -22,7 +21,6 @@ def save_user(user_id):
         with open(USER_FILE, "a") as f:
             f.write(str(user_id) + "\n")
 
-# --- Subscription Guard ---
 def is_subscribed(user_id):
     try:
         status = bot.get_chat_member(CHANNEL_ID, user_id).status
@@ -36,20 +34,14 @@ def send_force_join(message):
     markup.add(types.InlineKeyboardButton("🔄 I have Joined", callback_data="check_sub"))
     bot.send_message(message.chat.id, "⚠️ **Please join our channel to use this bot!**", reply_markup=markup, parse_mode="Markdown")
 
-# --- 1. Start Command ---
 @bot.message_handler(commands=['start'])
 def start(message):
     save_user(message.from_user.id)
     if not is_subscribed(message.from_user.id):
         send_force_join(message)
     else:
-        welcome_text = (
-            "👋 Welcome to YouTube, TikTok, Facebook and Instagram video downloader!\n\n"
-            "Just send me the link and I will send you both Video and Audio automatically."
-        )
-        bot.send_message(message.chat.id, welcome_text)
+        bot.send_message(message.chat.id, "👋 Welcome to YouTube, TikTok, Facebook and Instagram video downloader!\n\nSend a link, I'll send Video & Audio.")
 
-# --- 2. Admin Broadcast ---
 @bot.message_handler(commands=['broadcast'])
 def broadcast(message):
     if message.from_user.id != ADMIN_ID: return
@@ -64,7 +56,6 @@ def broadcast(message):
             except: pass
         bot.send_message(ADMIN_ID, "✅ Broadcast Done!")
 
-# --- 3. Handle Link (Automatic Download) ---
 @bot.message_handler(func=lambda message: "http" in message.text)
 def handle_link(message):
     if not is_subscribed(message.from_user.id):
@@ -73,68 +64,35 @@ def handle_link(message):
     
     save_user(message.from_user.id)
     url = message.text
-    status_msg = bot.send_message(message.chat.id, "⏳ ቪዲዮውን እና ኦዲዮውን በማዘጋጀት ላይ ነኝ... እባክዎ ይጠብቁ።")
+    status_msg = bot.send_message(message.chat.id, "⏳ Downloading... please wait.")
     
     try:
-        # 1. ቪዲዮውን ማውረድ
-        vid_file = download_file(url, is_mp3=False)
-        if vid_file and os.path.exists(vid_file):
-            with open(vid_file, 'rb') as f:
-                bot.send_video(message.chat.id, f, caption=f"🎬 Video - @{bot.get_me().username}")
-            os.remove(vid_file)
-        
-        # 2. ኦዲዮውን ማውረድ
-        aud_file = download_file(url, is_mp3=True)
-        if aud_file and os.path.exists(aud_file):
-            with open(aud_file, 'rb') as f:
-                bot.send_audio(message.chat.id, f, caption=f"🎵 Audio - @{bot.get_me().username}")
-            os.remove(aud_file)
+        # ቪዲዮ ማውረጃ
+        ydl_opts_vid = {'format': 'best[ext=mp4]/best', 'outtmpl': 'vid.mp4', 'quiet': True}
+        with YoutubeDL(ydl_opts_vid) as ydl:
+            ydl.download([url])
+        with open('vid.mp4', 'rb') as f:
+            bot.send_video(message.chat.id, f, caption="🎬 Video")
+        os.remove('vid.mp4')
+
+        # ኦዲዮ ማውረጃ
+        ydl_opts_aud = {'format': 'bestaudio/best', 'outtmpl': 'aud.mp3', 'quiet': True}
+        with YoutubeDL(ydl_opts_aud) as ydl:
+            ydl.download([url])
+        with open('aud.mp3', 'rb') as f:
+            bot.send_audio(message.chat.id, f, caption="🎵 Audio")
+        os.remove('aud.mp3')
 
         bot.delete_message(message.chat.id, status_msg.message_id)
     except Exception as e:
-        bot.edit_message_text(f"❌ ስህተት ተፈጥሯል! እባክዎ ሊንኩ ትክክል መሆኑን ያረጋግጡ።", message.chat.id, status_msg.message_id)
+        bot.edit_message_text(f"❌ Error: {str(e)[:50]}", message.chat.id, status_msg.message_id)
 
-# --- 4. Download Helper ---
-def download_file(url, is_mp3):
-    ext = "mp3" if is_mp3 else "mp4"
-    file_name = f"file_{int(time.time())}_{ext}.{ext}"
-    
-    # የ yt-dlp አማራጮች
-    ydl_opts = {
-        'format': 'bestaudio/best' if is_mp3 else 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'outtmpl': file_name,
-        'quiet': True,
-        'no_warnings': True,
-        'nocheckcertificate': True,
-    }
-    
-    if is_mp3:
-        ydl_opts['postprocessors'] = [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }]
-    
-    try:
-        with YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        return file_name if os.path.exists(file_name) else None
-    except Exception as e:
-        print(f"Download Error: {e}")
-        return None
-
-# --- 5. Verification Callback ---
 @bot.callback_query_handler(func=lambda call: call.data == "check_sub")
 def check_sub(call):
     if is_subscribed(call.from_user.id):
-        bot.edit_message_text("✅ Verified! Send a link.", call.message.chat.id, call.message.message_id)
+        bot.edit_message_text("✅ Verified!", call.message.chat.id, call.message.message_id)
     else:
-        bot.answer_callback_query(call.id, "❌ Join the channel first!", show_alert=True)
+        bot.answer_callback_query(call.id, "❌ Join first!", show_alert=True)
 
 if __name__ == "__main__":
-    print("🚀 Automatic Downloader is Running...")
-    while True:
-        try:
-            bot.polling(none_stop=True, interval=0, timeout=60)
-        except Exception as e:
-            time.sleep(5)
+    bot.infinity_polling()

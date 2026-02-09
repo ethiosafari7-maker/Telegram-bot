@@ -12,7 +12,7 @@ bot = telebot.TeleBot(API_TOKEN)
 
 USER_FILE = "users.txt"
 
-# --- Database ---
+# --- Database Management ---
 def save_user(user_id):
     if not os.path.exists(USER_FILE):
         open(USER_FILE, "w").close()
@@ -22,7 +22,7 @@ def save_user(user_id):
         with open(USER_FILE, "a") as f:
             f.write(str(user_id) + "\n")
 
-# --- Force Join Check ---
+# --- Force Join System ---
 def is_subscribed(user_id):
     try:
         status = bot.get_chat_member(CHANNEL_ID, user_id).status
@@ -36,7 +36,7 @@ def send_force_join(message):
     markup.add(types.InlineKeyboardButton("🔄 I have Joined", callback_data="check_sub"))
     bot.send_message(message.chat.id, "⚠️ **Please join our channel to use this bot!**", reply_markup=markup, parse_mode="Markdown")
 
-# --- 1. Start & Welcome ---
+# --- 1. Welcome Message ---
 @bot.message_handler(commands=['start'])
 def start(message):
     save_user(message.from_user.id)
@@ -46,9 +46,7 @@ def start(message):
         welcome_text = (
             "👋 Welcome to YouTube, TikTok, Facebook and Instagram video downloader!\n\n"
             "📌 **How to use:**\n"
-            "1. Just send me any video link.\n"
-            "2. I will automatically send you both Video and Audio (MP3).\n"
-            "3. You can also search by typing `@bot_username` followed by video name."
+            "Just send me any video link and I will download the video for you."
         )
         bot.send_message(message.chat.id, welcome_text)
 
@@ -95,7 +93,7 @@ def query_text(inline_query):
     except Exception as e:
         print(f"Inline Search Error: {e}")
 
-# --- 4. Main Link Handler ---
+# --- 4. Main Video Handler ---
 @bot.message_handler(func=lambda message: "http" in message.text)
 def handle_link(message):
     if not is_subscribed(message.from_user.id):
@@ -104,71 +102,45 @@ def handle_link(message):
     
     save_user(message.from_user.id)
     url = message.text
-    status_msg = bot.send_message(message.chat.id, "⏳ Downloading Video & Audio... Please wait.")
+    status_msg = bot.send_message(message.chat.id, "⏳ ቪዲዮውን በማዘጋጀት ላይ ነኝ... እባክዎ ይጠብቁ።")
 
-    try:
-        # Download Video
-        vid_path = download_video(url)
-        if vid_path:
-            with open(vid_path, 'rb') as v:
-                bot.send_video(message.chat.id, v, caption=f"🎬 Video - @{bot.get_me().username}")
-            os.remove(vid_path)
-
-        # Download Audio
-        aud_path = download_audio(url)
-        if aud_path:
-            with open(aud_path, 'rb') as a:
-                bot.send_audio(message.chat.id, a, caption=f"🎵 Audio - @{bot.get_me().username}")
-            os.remove(aud_path)
-            
-        bot.delete_message(message.chat.id, status_msg.message_id)
-    except Exception as e:
-        bot.edit_message_text(f"❌ Error: Link not supported or file too large.", message.chat.id, status_msg.message_id)
-
-# --- 5. Download Helpers ---
-def download_video(url):
+    # ምርጡን ቪዲዮ ለማውረድ የሚያገለግል ቅንብር
     file_name = f"vid_{int(time.time())}.mp4"
     ydl_opts = {
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': file_name,
         'quiet': True,
-        'no_warnings': True
+        'no_warnings': True,
+        'nocheckcertificate': True,
     }
+
     try:
         with YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-        return file_name if os.path.exists(file_name) else None
-    except: return None
+        
+        if os.path.exists(file_name):
+            with open(file_name, 'rb') as v:
+                bot.send_video(message.chat.id, v, caption=f"🎬 @{bot.get_me().username}")
+            os.remove(file_name)
+            bot.delete_message(message.chat.id, status_msg.message_id)
+        else:
+            bot.edit_message_text("❌ ስህተት፡ ቪዲዮውን ማግኘት አልተቻለም።", message.chat.id, status_msg.message_id)
+            
+    except Exception as e:
+        bot.edit_message_text(f"❌ ስህተት ተፈጥሯል! ሊንኩን ወይም የቪዲዮውን መጠን ያረጋግጡ።", message.chat.id, status_msg.message_id)
+        if os.path.exists(file_name): os.remove(file_name)
 
-def download_audio(url):
-    file_name = f"aud_{int(time.time())}.mp3"
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': file_name,
-        'quiet': True,
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
-    }
-    try:
-        with YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        return file_name if os.path.exists(file_name) else None
-    except: return None
-
-# --- 6. Verification Callback ---
+# --- 5. Subscription Verification ---
 @bot.callback_query_handler(func=lambda call: call.data == "check_sub")
 def check_sub(call):
     if is_subscribed(call.from_user.id):
-        bot.edit_message_text("✅ Verified! Send a link.", call.message.chat.id, call.message.message_id)
+        bot.edit_message_text("✅ Verified! You can now send links.", call.message.chat.id, call.message.message_id)
     else:
-        bot.answer_callback_query(call.id, "❌ Join the channel first!", show_alert=True)
+        bot.answer_callback_query(call.id, "❌ You haven't joined yet!", show_alert=True)
 
-# --- 7. Start Polling ---
+# --- 6. Polling ---
 if __name__ == "__main__":
-    print("🚀 Bot is Online...")
+    print("🚀 Video Downloader is Active...")
     while True:
         try:
             bot.polling(none_stop=True, interval=0, timeout=60, allowed_updates=['message', 'callback_query', 'inline_query'])
